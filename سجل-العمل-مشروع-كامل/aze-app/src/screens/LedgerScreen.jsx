@@ -1,11 +1,46 @@
 import { useState, useMemo } from 'react'
-import { formatShort, formatNumber } from '../dateUtils.js'
+import { formatShort, formatNumber, toKey, addDays, startOfWeek } from '../dateUtils.js'
 
 function makeId() {
   return 'tx_' + Math.random().toString(36).slice(2, 10)
 }
 
+// Signed value of a movement: income adds, expense subtracts.
+// Older entries have no type and are treated as expenses.
+function signed(t) {
+  return (t.type === 'in' ? 1 : -1) * t.amount
+}
+
+function PeriodCard({ label, net }) {
+  const up = net > 0
+  const flat = net === 0
+  const color = flat ? 'var(--ink-soft)' : up ? 'var(--accent)' : 'var(--warn)'
+  const verdict = flat ? 'متعادل' : up ? 'ربح' : 'خسارة'
+  const sign = up ? '+' : net < 0 ? '−' : ''
+  return (
+    <div className="card" style={{ padding: '14px 8px', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontWeight: 600, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color }}>{sign}{formatNumber(Math.abs(net))}</div>
+      <div
+        style={{
+          display: 'inline-block',
+          marginTop: 6,
+          fontSize: 11,
+          fontWeight: 700,
+          padding: '2px 10px',
+          borderRadius: 20,
+          background: flat ? 'var(--surface-2)' : up ? 'var(--accent-soft)' : 'var(--warn-soft)',
+          color,
+        }}
+      >
+        {verdict}
+      </div>
+    </div>
+  )
+}
+
 function TransactionForm({ onSave, onClose }) {
+  const [type, setType] = useState('out')
   const [amount, setAmount] = useState('')
   const [details, setDetails] = useState('')
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -15,7 +50,32 @@ function TransactionForm({ onSave, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 18 }}>إضافة دفعة</h3>
+        <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 18 }}>إضافة حركة</h3>
+
+        <label className="field-label">النوع</label>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          {[
+            { key: 'out', label: 'صرف', color: 'var(--warn)', bg: 'var(--warn-soft)' },
+            { key: 'in', label: 'دخل', color: 'var(--accent)', bg: 'var(--accent-soft)' },
+          ].map((o) => (
+            <button
+              key={o.key}
+              onClick={() => setType(o.key)}
+              style={{
+                flex: 1,
+                padding: '12px 8px',
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: 15,
+                background: type === o.key ? o.bg : 'var(--surface-2)',
+                border: type === o.key ? `2px solid ${o.color}` : '2px solid transparent',
+                color: type === o.key ? o.color : 'var(--ink-soft)',
+              }}
+            >
+              {o.label} {type === o.key && '✓'}
+            </button>
+          ))}
+        </div>
 
         <label className="field-label" htmlFor="tx-date">التاريخ</label>
         <input
@@ -27,7 +87,7 @@ function TransactionForm({ onSave, onClose }) {
           style={{ marginBottom: 14 }}
         />
 
-        <label className="field-label" htmlFor="tx-amount">المبلغ المدفوع</label>
+        <label className="field-label" htmlFor="tx-amount">المبلغ</label>
         <input
           id="tx-amount"
           type="number"
@@ -55,11 +115,11 @@ function TransactionForm({ onSave, onClose }) {
             disabled={!canSave}
             onClick={() => {
               if (!canSave) return
-              onSave({ id: makeId(), date, amount: Number(amount), details: details.trim() })
+              onSave({ id: makeId(), date, amount: Number(amount), details: details.trim(), type })
               onClose()
             }}
           >
-            حفظ الدفعة
+            حفظ الحركة
           </button>
           <button className="btn-secondary" onClick={onClose}>إلغاء</button>
         </div>
@@ -109,8 +169,24 @@ export default function LedgerScreen({ data, updateData }) {
     [transactions]
   )
 
-  const totalPaid = useMemo(() => transactions.reduce((sum, t) => sum + t.amount, 0), [transactions])
-  const balance = baseAmount - totalPaid
+  const netTotal = useMemo(() => transactions.reduce((sum, t) => sum + signed(t), 0), [transactions])
+  const balance = baseAmount + netTotal
+
+  const periods = useMemo(() => {
+    const now = new Date()
+    const wStart = toKey(startOfWeek(now))
+    const wEnd = toKey(addDays(startOfWeek(now), 6))
+    const mPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const yPrefix = `${now.getFullYear()}-`
+    let week = 0, month = 0, year = 0
+    transactions.forEach((t) => {
+      const s = signed(t)
+      if (t.date >= wStart && t.date <= wEnd) week += s
+      if (t.date.startsWith(mPrefix)) month += s
+      if (t.date.startsWith(yPrefix)) year += s
+    })
+    return { week, month, year }
+  }, [transactions])
 
   const addTransaction = (tx) => {
     updateData((prev) => ({
@@ -169,12 +245,19 @@ export default function LedgerScreen({ data, updateData }) {
         <button className="btn-secondary" onClick={() => setBaseFormOpen(true)}>تعديل</button>
       </div>
 
-      <div className="section-title">سجل الدفعات</div>
+      <div className="section-title">صافي الحركة</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <PeriodCard label="هذا الأسبوع" net={periods.week} />
+        <PeriodCard label="هذا الشهر" net={periods.month} />
+        <PeriodCard label="هذه السنة" net={periods.year} />
+      </div>
+
+      <div className="section-title">سجل الحركات</div>
 
       {sorted.length === 0 ? (
         <div className="empty-state">
           <div className="icon">💸</div>
-          <p style={{ fontWeight: 700, fontSize: 16 }}>لا توجد دفعات مسجلة بعد</p>
+          <p style={{ fontWeight: 700, fontSize: 16 }}>لا توجد حركات مسجلة بعد</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -187,9 +270,11 @@ export default function LedgerScreen({ data, updateData }) {
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontWeight: 800, color: 'var(--warn)' }}>-{formatNumber(t.amount)}</span>
+                <span style={{ fontWeight: 800, color: t.type === 'in' ? 'var(--accent)' : 'var(--warn)' }}>
+                  {t.type === 'in' ? '+' : '−'}{formatNumber(t.amount)}
+                </span>
                 <button
-                  onClick={() => { if (confirm('حذف هذه الدفعة؟')) deleteTransaction(t.id) }}
+                  onClick={() => { if (confirm('حذف هذه الحركة؟')) deleteTransaction(t.id) }}
                   aria-label="حذف"
                   style={{ color: 'var(--ink-soft)', fontSize: 18, padding: 4 }}
                 >
@@ -202,7 +287,7 @@ export default function LedgerScreen({ data, updateData }) {
       )}
 
       <button className="btn-primary" style={{ marginTop: 20 }} onClick={() => setTxFormOpen(true)}>
-        + إضافة دفعة
+        + إضافة حركة
       </button>
 
       {txFormOpen && <TransactionForm onSave={addTransaction} onClose={() => setTxFormOpen(false)} />}

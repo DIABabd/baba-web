@@ -3,12 +3,14 @@ import { loadData, saveData, exportData, importData } from './storage.js'
 import { toKey, fromKey, addDays, formatLong, formatShort, isToday, formatNumber } from './dateUtils.js'
 import TodayScreen from './screens/TodayScreen.jsx'
 import EmployeesScreen from './screens/EmployeesScreen.jsx'
+import StatisticsScreen from './screens/StatisticsScreen.jsx'
 import LedgerScreen from './screens/LedgerScreen.jsx'
 import SettingsScreen from './screens/SettingsScreen.jsx'
 
 const TABS = [
   { id: 'today', label: 'اليوم', icon: '🗓️' },
   { id: 'employees', label: 'الموظفون', icon: '👥' },
+  { id: 'stats', label: 'الإحصائيات', icon: '📊' },
   { id: 'ledger', label: 'السلفة', icon: '💰' },
   { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
 ]
@@ -48,6 +50,7 @@ export default function App() {
       <main>
         {tab === 'today' && <TodayScreen data={data} updateData={updateData} />}
         {tab === 'employees' && <EmployeesScreen data={data} updateData={updateData} />}
+        {tab === 'stats' && <StatisticsScreen data={data} />}
         {tab === 'ledger' && <LedgerScreen data={data} updateData={updateData} />}
         {tab === 'settings' && (
           <SettingsScreen data={data} onExport={() => exportData(data)} onImport={handleImport} />

@@ -22,6 +22,27 @@ function addDays(date, n) {
   return d
 }
 
+function addMonths(date, n) {
+  const d = new Date(date)
+  d.setMonth(d.getMonth() + n)
+  return d
+}
+
+function addYears(date, n) {
+  const d = new Date(date)
+  d.setFullYear(d.getFullYear() + n)
+  return d
+}
+
+// Week starts on Saturday (common work-week start in the region).
+function startOfWeek(date) {
+  const d = new Date(date)
+  const diff = (d.getDay() - 6 + 7) % 7
+  d.setDate(d.getDate() - diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 function formatLong(date) {
   return `${WEEKDAYS_AR[date.getDay()]}، ${date.getDate()} ${MONTHS_AR[date.getMonth()]} ${date.getFullYear()}`
 }
@@ -40,4 +61,4 @@ function formatNumber(n) {
   return new Intl.NumberFormat('en-US').format(n)
 }
 
-export { toKey, fromKey, addDays, formatLong, formatShort, isToday, formatNumber, WEEKDAYS_AR, MONTHS_AR }
+export { toKey, fromKey, addDays, addMonths, addYears, startOfWeek, formatLong, formatShort, isToday, formatNumber, WEEKDAYS_AR, MONTHS_AR }

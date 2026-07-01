@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { fromKey } from '../dateUtils.js'
+import { formatNumber } from '../dateUtils.js'
 
 function makeId() {
   return 'emp_' + Math.random().toString(36).slice(2, 10)
@@ -54,14 +54,13 @@ export default function EmployeesScreen({ data, updateData }) {
     const now = new Date()
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const result = {}
-    data.employees.forEach((e) => { result[e.id] = { present: 0, unpaid: 0, absent: 0 } })
+    data.employees.forEach((e) => { result[e.id] = { present: 0, paid: 0 } })
     Object.entries(data.entries).forEach(([dateKey, dayObj]) => {
       if (!dateKey.startsWith(ym)) return
-      Object.entries(dayObj).forEach(([empId, status]) => {
-        if (!result[empId]) return
-        if (status === 'present_paid' || status === 'present_unpaid') result[empId].present++
-        if (status === 'present_unpaid') result[empId].unpaid++
-        if (status === 'absent') result[empId].absent++
+      Object.entries(dayObj).forEach(([empId, en]) => {
+        if (!result[empId] || !en) return
+        if (en.present === true) result[empId].present++
+        result[empId].paid += Number(en.paid) || 0
       })
     })
     return result
@@ -110,7 +109,7 @@ export default function EmployeesScreen({ data, updateData }) {
           <div className="section-title">هذا الشهر</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {data.employees.map((emp) => {
-              const s = stats[emp.id] || { present: 0, unpaid: 0, absent: 0 }
+              const s = stats[emp.id] || { present: 0, paid: 0 }
               return (
                 <button
                   key={emp.id}
@@ -126,9 +125,9 @@ export default function EmployeesScreen({ data, updateData }) {
                     <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>
                       {s.present} أيام حضور
                     </span>
-                    {s.unpaid > 0 && (
+                    {s.paid > 0 && (
                       <span style={{ fontSize: 13, color: 'var(--warn)', fontWeight: 600 }}>
-                        {s.unpaid} غير مدفوعة
+                        {formatNumber(s.paid)} مدفوع
                       </span>
                     )}
                   </div>

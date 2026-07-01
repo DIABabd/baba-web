@@ -1,50 +1,76 @@
-import { useState, useMemo } from 'react'
-import { toKey, fromKey, addDays, formatLong, isToday } from '../dateUtils.js'
+import { useState, useMemo, useRef } from 'react'
+import { toKey, fromKey, addDays, formatLong, isToday, formatNumber } from '../dateUtils.js'
 
-const STATUS = {
-  present_paid: { label: 'حاضر ودُفع', short: 'دُفع', color: '#3d5a4c', bg: '#c9d9cd' },
-  present_unpaid: { label: 'حاضر ولم يُدفع', short: 'لم يُدفع', color: '#b5532f', bg: '#f1d9cc' },
-  absent: { label: 'غائب', short: 'غائب', color: '#6b6358', bg: '#e3dccb' },
-}
+const PRESENT = { label: 'حاضر', color: '#3d5a4c', bg: '#c9d9cd' }
+const ABSENT = { label: 'غائب', color: '#6b6358', bg: '#e3dccb' }
 
-function StatusPicker({ value, onChange, onClose, employeeName }) {
+function EntryEditor({ entry, onSave, onClose, employeeName }) {
+  const [present, setPresent] = useState(entry?.present ?? null)
+  const [paid, setPaid] = useState(
+    entry && Number(entry.paid) ? String(entry.paid) : ''
+  )
+
+  const save = () => {
+    onSave({ present, paid: Number(paid) || 0 })
+    onClose()
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{employeeName}</h3>
-        <p style={{ color: 'var(--ink-soft)', fontSize: 13, marginBottom: 18 }}>اختر الحالة لهذا اليوم</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {Object.entries(STATUS).map(([key, s]) => (
+        <p style={{ color: 'var(--ink-soft)', fontSize: 13, marginBottom: 18 }}>الحضور والمبلغ المدفوع لهذا اليوم</p>
+
+        <label className="field-label">الحضور</label>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+          {[
+            { key: true, s: PRESENT },
+            { key: false, s: ABSENT },
+          ].map(({ key, s }) => (
             <button
-              key={key}
-              onClick={() => { onChange(key); onClose() }}
+              key={String(key)}
+              onClick={() => setPresent((p) => (p === key ? null : key))}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px 18px',
+                flex: 1,
+                padding: '14px 10px',
                 borderRadius: 14,
-                background: value === key ? s.bg : 'var(--surface-2)',
-                border: value === key ? `2px solid ${s.color}` : '2px solid transparent',
+                background: present === key ? s.bg : 'var(--surface-2)',
+                border: present === key ? `2px solid ${s.color}` : '2px solid transparent',
                 fontWeight: 700,
                 fontSize: 16,
                 color: 'var(--ink)',
               }}
             >
-              <span>{s.label}</span>
-              {value === key && <span style={{ color: s.color }}>✓</span>}
+              {s.label} {present === key && '✓'}
             </button>
           ))}
-          {value && (
-            <button
-              onClick={() => { onChange(null); onClose() }}
-              className="btn-ghost"
-              style={{ textAlign: 'center', marginTop: 4 }}
-            >
-              مسح الحالة
-            </button>
-          )}
         </div>
+
+        <label className="field-label" htmlFor="paid-amount">المبلغ المدفوع</label>
+        <input
+          id="paid-amount"
+          className="input"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          value={paid}
+          onChange={(e) => setPaid(e.target.value)}
+          placeholder="0"
+        />
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button className="btn-primary" onClick={save}>حفظ</button>
+          <button className="btn-secondary" onClick={onClose}>إلغاء</button>
+        </div>
+        {entry && (
+          <button
+            onClick={() => { onSave(null); onClose() }}
+            className="btn-ghost"
+            style={{ textAlign: 'center', marginTop: 12, width: '100%' }}
+          >
+            مسح تسجيل هذا اليوم
+          </button>
+        )}
       </div>
     </div>
   )
@@ -53,19 +79,34 @@ function StatusPicker({ value, onChange, onClose, employeeName }) {
 export default function TodayScreen({ data, updateData }) {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [pickerEmployee, setPickerEmployee] = useState(null)
+  const dateInputRef = useRef(null)
+
+  const openDatePicker = () => {
+    const el = dateInputRef.current
+    if (!el) return
+    if (typeof el.showPicker === 'function') {
+      try { el.showPicker(); return } catch { /* fall through */ }
+    }
+    el.focus()
+    el.click()
+  }
 
   const dateKey = toKey(selectedDate)
   const dayEntries = data.entries[dateKey] || {}
   const employees = data.employees
 
-  const setStatus = (employeeId, status) => {
+  const setEntry = (employeeId, entry) => {
     updateData((prev) => {
       const entries = { ...prev.entries }
       const dayObj = { ...(entries[dateKey] || {}) }
-      if (status === null) {
+      const isEmpty = !entry || (entry.present == null && !entry.paid)
+      if (isEmpty) {
         delete dayObj[employeeId]
       } else {
-        dayObj[employeeId] = status
+        dayObj[employeeId] = {
+          present: entry.present === true ? true : entry.present === false ? false : null,
+          paid: Number(entry.paid) || 0,
+        }
       }
       if (Object.keys(dayObj).length === 0) {
         delete entries[dateKey]
@@ -77,13 +118,14 @@ export default function TodayScreen({ data, updateData }) {
   }
 
   const summary = useMemo(() => {
-    let present = 0, unpaid = 0
+    let present = 0, totalPaid = 0
     employees.forEach((e) => {
-      const s = dayEntries[e.id]
-      if (s === 'present_paid' || s === 'present_unpaid') present++
-      if (s === 'present_unpaid') unpaid++
+      const en = dayEntries[e.id]
+      if (!en) return
+      if (en.present === true) present++
+      totalPaid += Number(en.paid) || 0
     })
-    return { present, unpaid, total: employees.length }
+    return { present, totalPaid, total: employees.length }
   }, [dayEntries, employees])
 
   return (
@@ -96,15 +138,32 @@ export default function TodayScreen({ data, updateData }) {
         >
           ‹
         </button>
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{formatLong(selectedDate)}</div>
+        <div style={{ textAlign: 'center', flex: 1, position: 'relative' }}>
+          <button
+            onClick={openDatePicker}
+            style={{ fontWeight: 800, fontSize: 16, background: 'transparent', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <span>{formatLong(selectedDate)}</span>
+            <span style={{ fontSize: 11, color: 'var(--ink-soft)' }}>▾</span>
+          </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={toKey(selectedDate)}
+            onChange={(e) => { if (e.target.value) setSelectedDate(fromKey(e.target.value)) }}
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{ position: 'absolute', bottom: 0, left: '50%', width: 1, height: 1, opacity: 0, pointerEvents: 'none', border: 0, padding: 0 }}
+          />
           {!isToday(selectedDate) && (
-            <button
-              onClick={() => setSelectedDate(new Date())}
-              style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginTop: 4 }}
-            >
-              الرجوع إلى اليوم
-            </button>
+            <div>
+              <button
+                onClick={() => setSelectedDate(new Date())}
+                style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginTop: 4 }}
+              >
+                الرجوع إلى اليوم
+              </button>
+            </div>
           )}
         </div>
         <button
@@ -139,8 +198,8 @@ export default function TodayScreen({ data, updateData }) {
               <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontWeight: 600 }}>حاضر</div>
             </div>
             <div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--warn)' }}>{summary.unpaid}</div>
-              <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontWeight: 600 }}>لم يُدفع</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--warn)' }}>{formatNumber(summary.totalPaid)}</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontWeight: 600 }}>المدفوع</div>
             </div>
             <div>
               <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-soft)' }}>{summary.total}</div>
@@ -151,8 +210,9 @@ export default function TodayScreen({ data, updateData }) {
           <div className="section-title">الموظفون</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {employees.map((emp) => {
-              const status = dayEntries[emp.id]
-              const s = status ? STATUS[status] : null
+              const en = dayEntries[emp.id]
+              const att = en && en.present === true ? PRESENT : en && en.present === false ? ABSENT : null
+              const paid = en ? Number(en.paid) || 0 : 0
               return (
                 <button
                   key={emp.id}
@@ -168,17 +228,33 @@ export default function TodayScreen({ data, updateData }) {
                   }}
                 >
                   <span style={{ fontWeight: 700, fontSize: 16 }}>{emp.name}</span>
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      padding: '6px 14px',
-                      borderRadius: 20,
-                      background: s ? s.bg : 'var(--surface-2)',
-                      color: s ? s.color : 'var(--ink-soft)',
-                    }}
-                  >
-                    {s ? s.short : 'لم يُحدد'}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {paid > 0 && (
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          padding: '6px 12px',
+                          borderRadius: 20,
+                          background: '#f1d9cc',
+                          color: '#b5532f',
+                        }}
+                      >
+                        {formatNumber(paid)}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        padding: '6px 14px',
+                        borderRadius: 20,
+                        background: att ? att.bg : 'var(--surface-2)',
+                        color: att ? att.color : 'var(--ink-soft)',
+                      }}
+                    >
+                      {att ? att.label : 'لم يُحدد'}
+                    </span>
                   </span>
                 </button>
               )
@@ -188,10 +264,10 @@ export default function TodayScreen({ data, updateData }) {
       )}
 
       {pickerEmployee && (
-        <StatusPicker
+        <EntryEditor
           employeeName={pickerEmployee.name}
-          value={dayEntries[pickerEmployee.id] || null}
-          onChange={(status) => setStatus(pickerEmployee.id, status)}
+          entry={dayEntries[pickerEmployee.id] || null}
+          onSave={(entry) => setEntry(pickerEmployee.id, entry)}
           onClose={() => setPickerEmployee(null)}
         />
       )}
